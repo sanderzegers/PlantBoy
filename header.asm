@@ -2,6 +2,9 @@
 ;	Header
 ;-------------
 
+; DMA Routine described here: https://exez.in/gameboy-dma
+
+
 SECTION "Copy Data",ROM0[$28] ;copy DMA routine to HRAM
 COPY_DATA:
 	pop hl

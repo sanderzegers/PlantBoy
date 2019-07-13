@@ -13,22 +13,25 @@
 ; Start
 ;-------------
 
+; Section syntax: Section name, type [start addr]
+
 SECTION "Program Start",ROM0[$150]
 START:
 	ei				 ;enable interrupts
-	ld  sp,$FFFE
-	ld  a,IEF_VBLANK ;enable vblank interrupt
-	ld  [rIE],a
+	ld  sp,$FFFE	 ;set stack pointer to $FFEE
+	ld  a,IEF_VBLANK ;enable vblank interrupt = %00000001
+	ld  [rIE],a		 ;rIE = $FFFF: Interrupt Enable
 
 	ld  a,$0
-	ldh [rLCDC],a 	 ;LCD off
-	ldh [rSTAT],a
+	ldh [rLCDC],a 	 ;LCD off / rLCDC $FF40
+	ldh [rSTAT],a	 ;rstat $FF41 LCDC Stat
 
 	ld  a,%11100100  ;shade palette (11 10 01 00)
-	ldh [rBGP],a 	 ;setup palettes
-	ldh [rOCPD],a
+	ldh [rBGP],a 	 ;setup palettes / rBGP = $FF47
+	ldh [rOCPD],a	; rOCPD = $FF6B, object color palette (GBC)
 	ldh [rOBP0],a
 
+	call CLEAR_DMA_SOURCE_WRAM
 	call CLEAR_MAP
 	call LOAD_TILES
 	call LOAD_MAP
@@ -90,8 +93,24 @@ WAIT_VBLANK:
 	ld  [rabbit_frame_time],a
 	ret
 
+; Apparently RAM is zeroed on the hardware (gbc & gba tested), BGB has random data in WRAM. 
+; Set area which is used by DMA to all zero
+
+CLEAR_DMA_SOURCE_WRAM:
+	ld  hl,$c100    ;graphics location
+	ld  bc,$9F		;oam size
+.clear_oam_loop
+	ld a, $0		
+	ld [hli], a		;set memory at [hl] to 0, inc hl +1
+	dec bc
+	ld a, b
+	or c
+	jr nz,.clear_oam_loop
+	ret
+
+
 DMA_COPY:
-	ld  de,$FF80  	 ;DMA routine, gets placed in HRAM
+	ld  de,_HRAM  	 ;DMA routine, gets placed in HRAM
 	rst $28
 	DB  $00,$0D
 	DB  $F5, $3E, $C1, $EA, $46, $FF, $3E, $28, $3D, $20, $FD, $F1, $D9
@@ -326,7 +345,6 @@ UPDATE_RABBITS:
 	jr  nz,.end
 	ld  a,$0
 	ld  [rabbit_move_time],a
-
 	ld  a,[rabbit_y_spawn]
 	cp  $90
 	jr  nz,.loop_start
@@ -686,14 +704,20 @@ UPDATE_BULLET:
 	jr  z,.right
 .left
 	dec a
+	dec a
 	jp  .check_collision
 .right
+	inc a
 	inc a
 .check_collision
 	ld  [bullet_x],a
 	cp  $0
 	jr  z,.reset
+	cp  $1
+	jr  z,.reset
 	cp  $A4
+	jr  z,.reset
+	cp  $A3
 	jr  z,.reset
 .end
 	ret
@@ -740,6 +764,10 @@ PLAY_WATER:
 ;-------------
 ; RAM Vars
 ;-------------
+
+; DB = Byte
+; DW = Word / 2 byte
+; DL = DoubleWord / 4 byte
 
 SECTION "RAM Vars",WRAM0[$C000]
 vblank_flag:
@@ -817,7 +845,7 @@ db
 rabbit_sprites:
 db 								 ;8 wabbits
 
-
 ;-------------
 ; End of file
 ;-------------
+
