@@ -22,6 +22,7 @@ START:
 	ld  a,IEF_VBLANK ;enable vblank interrupt = %00000001
 	ld  [rIE],a		 ;rIE = $FFFF: Interrupt Enable
 
+	CALL WAIT_VBLANK
 	ld  a,$0
 	ldh [rLCDC],a 	 ;LCD off / rLCDC $FF40
 	ldh [rSTAT],a	 ;rstat $FF41 LCDC Stat
@@ -44,7 +45,7 @@ START:
 
 	call DMA_COPY    ;move DMA routine to HRAM
 LOOP:
-	call WAIT_VBLANK
+	
 	call READ_JOYPAD
 	call MOVE_PLAYER
 	call PLAYER_SHOOT
@@ -54,6 +55,7 @@ LOOP:
 	call UPDATE_RABBITS
 	call UPDATE_PLAYER
 	call PLAYER_WATER
+	call WAIT_VBLANK
 	call _HRAM		 ;call DMA routine from HRAM
 	jp LOOP
 
@@ -95,6 +97,8 @@ WAIT_VBLANK:
 
 ; Apparently RAM is zeroed on the hardware (gbc & gba tested), BGB has random data in WRAM. 
 ; Set area which is used by DMA to all zero
+
+
 
 CLEAR_DMA_SOURCE_WRAM:
 	ld  hl,$c100    ;graphics location
@@ -777,7 +781,7 @@ db
 vblank_count:
 db
 joypad_down:
-db 				     			 ;dow/up/lef/rig/sta/sel/a/b
+db 	     			 ;dow/up/lef/rig/sta/sel/a/b
 joypad_pressed:
 db
 player_frame_time:
