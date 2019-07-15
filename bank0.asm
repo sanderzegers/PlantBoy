@@ -22,7 +22,9 @@ START:
 	ld  a,IEF_VBLANK ;enable vblank interrupt = %00000001
 	ld  [rIE],a		 ;rIE = $FFFF: Interrupt Enable
 
-	CALL WAIT_VBLANK
+	call INIT_TIMERS
+	call WAIT_VBLANK
+	
 	ld  a,$0
 	ldh [rLCDC],a 	 ;LCD off / rLCDC $FF40
 	ldh [rSTAT],a	 ;rstat $FF41 LCDC Stat
@@ -38,7 +40,6 @@ START:
 	call LOAD_MAP
 	call INIT_PLAYER
 	call INIT_RABBITS
-	call INIT_TIMERS
 
 	ld  a,%11010011  ;turn on LCD, BG0, OBJ0, etc
 	ldh [rLCDC],a    ;load LCD flags
@@ -113,6 +114,19 @@ CLEAR_DMA_SOURCE_WRAM:
 	ret
 
 
+; DMA_COPY routine:
+; first we load $C1 into the DMA register at $FF46
+; ld      a, $C1
+; ld      [$FF46], a
+; DMA transfer begins, we need to wait 160 microseconds while it transfers
+; the following loop takes exactly that long
+;ld      a, $28
+;.loop:
+; dec     a
+; jr      nz, .loop
+; ret
+
+
 DMA_COPY:
 	ld  de,_HRAM  	 ;DMA routine, gets placed in HRAM
 	rst $28
@@ -162,6 +176,7 @@ LOAD_MAP:
 
 INIT_TIMERS:
 	ld a,$0
+	ld [vblank_count],a
 	ld [rabbit_spawn_time],a
 	ld [blood_count],a
 	ld [rabbit_move_time],a
@@ -175,19 +190,40 @@ INIT_TIMERS:
 	ld [rabbit_frame],a
 	ret
 
+; Joypad description
+; Bit 7 - Not used
+; Bit 6 - Not used
+; Bit 5 - P15 Select Button Keys      (0=Select)
+; Bit 4 - P14 Select Direction Keys   (0=Select)
+; Bit 3 - P13 Input Down  or Start    (0=Pressed) (Read Only)
+; Bit 2 - P12 Input Up    or Select   (0=Pressed) (Read Only)
+; Bit 1 - P11 Input Left  or Button B (0=Pressed) (Read Only)
+; Bit 0 - P10 Input Right or Button A (0=Pressed) (Read Only)
+
+; Button UP:		1110 1011
+; complement: 		0001 0100
+; and %00001111: 	0000 0100
+; swap a:			0100 0000
+
+; Button B:			1101 1101
+; complement:		0010 0010
+; and %00001111:	0000 0010
+
+; a OR B:			0100 0010
+
 READ_JOYPAD:
-	ld  a,%00100000  ;select dpad
-	ld  [rP1],a
-	ld  a,[rP1]		 ;takes a few cycles to get accurate reading
+	ld  a,P1F_5  ;select dpad (p15)
+	ld  [rP1],a		;rP1 / Joypad / FF00
+	ld  a,[rP1]		;takes a few cycles to get accurate reading
 	ld  a,[rP1]
 	ld  a,[rP1]
 	ld  a,[rP1]
-	cpl 			 ;complement a
+	cpl 			 ;complement a / flip all bits
 	and %00001111    ;select dpad buttons
-	swap a
+	swap a 			;
 	ld  b,a
 
-	ld  a,%00010000  ;select other buttons
+	ld  a,P1F_4  ;select other buttons (p14)
 	ld  [rP1],a  
 	ld  a,[rP1]
 	ld  a,[rP1]
@@ -196,15 +232,15 @@ READ_JOYPAD:
 	cpl
 	and %00001111
 	or  b
-					 ;lower nybble is other
+					 ; higher nibble are dpad buttons, lower nibble is other buttons
 	ld  b,a
-	ld  a,[joypad_down]
+	ld  a,[joypad_pressed_dpad]
 	cpl
 	and b
-	ld  [joypad_pressed],a
+	ld  [joypad_pressed_action],a
 					 ;upper nybble is dpad
 	ld  a,b
-	ld  [joypad_down],a
+	ld  [joypad_pressed_dpad],a
 	ret
 
 JOY_RIGHT:
@@ -453,12 +489,12 @@ INIT_PLAYER:
 	ld  a,$6
 	ld  [bullet_tile],a
 	ld  a,$0
-	ld  [player_flags],a
-	ld  [bullet_flags],a
+	ld  [player_sprite_flags],a
+	ld  [bullet_sprite_flags],a
 	ld  [bullet_x],a
 	ld  [bullet_y],a
 	ld  [bullet_reset],a
-	ld  [blood_count_flags],a
+	ld  [blood_count_flags],a ;
 	ld  [crop_flags],a
 	ld  [crop_count_flags],a
 
@@ -491,7 +527,7 @@ MOVE_PLAYER:
 	jr  z,.tile_reset
 
 	ld  b,a
-	ld  a,[joypad_down]       ;dpad pressed? 
+	ld  a,[joypad_pressed_dpad]       ;dpad pressed? 
 	and %11110000
 	jr  z,.tile_reset
 
@@ -513,37 +549,37 @@ MOVE_PLAYER:
 	cp  $A0
 	jr  z,.move_left
 
-	ld  a,[joypad_down]
+	ld  a,[joypad_pressed_dpad]
 	call JOY_RIGHT
 	jr  nz,.move_left
 	ld  a,[player_x]
 	inc a
 	ld  [player_x],a
 
-	ld  a,[player_flags]        ;flip tile
-	res 5,a
-	ld  [player_flags],a
+	ld  a,[player_sprite_flags]        ;flip tile
+	res 5,a						;set bit 5 to 0 
+	ld  [player_sprite_flags],a
 .move_left
 	ld  a,[player_x]			;left bound
 	cp  $8
 	jr  z,.move_up
 
-	ld  a,[joypad_down]
+	ld  a,[joypad_pressed_dpad]
 	call JOY_LEFT
 	jr  nz,.move_up
 	ld  a,[player_x]
 	dec a
 	ld  [player_x],a
 
-	ld  a,[player_flags]        ;flip tile
+	ld  a,[player_sprite_flags]        ;flip tile
 	set 5,a
-	ld  [player_flags],a
+	ld  [player_sprite_flags],a
 .move_up
 	ld  a,[player_y] 			;up bound
 	cp  $10
 	jr  z,.move_down
 
-	ld  a,[joypad_down]
+	ld  a,[joypad_pressed_dpad]
 	call JOY_UP
 	jr  nz,.move_down
 	ld  a,[player_y]
@@ -554,7 +590,7 @@ MOVE_PLAYER:
 	cp  $90
 	jr  z,.move_done
 
-	ld  a,[joypad_down]
+	ld  a,[joypad_pressed_dpad]
 	call JOY_DOWN
 	jr  nz,.move_done
 	ld  a,[player_y]
@@ -564,7 +600,7 @@ MOVE_PLAYER:
 	ret
 
 PLAYER_SHOOT:
-	ld  a,[joypad_pressed]
+	ld  a,[joypad_pressed_action]
 	call JOY_A
 	cp  $1
 	jr  z,.shoot		 		    ;a pressed?
@@ -579,8 +615,8 @@ PLAYER_SHOOT:
 	ld  [bullet_x],a
 	ld  a,[player_y]
 	ld  [bullet_y],a
-	ld  a,[player_flags]
-	ld  [bullet_flags],a
+	ld  a,[player_sprite_flags]
+	ld  [bullet_sprite_flags],a
 	ld  a,$1
 	ld  [bullet_reset],a
 	call PLAY_NOISE
@@ -647,7 +683,7 @@ UPDATE_PLAYER:
 	ret
 
 PLAYER_WATER:
-	ld  a,[joypad_pressed]
+	ld  a,[joypad_pressed_action]
 	call JOY_B
 	jr  nz,.done
 	ld  a,[blood_count]
@@ -702,7 +738,7 @@ PLAYER_WATER:
 	ret
 
 UPDATE_BULLET:
-	ld  a,[bullet_flags]
+	ld  a,[bullet_sprite_flags]
 	and %00100000
 	ld  a,[bullet_x]
 	jr  z,.right
@@ -780,10 +816,10 @@ rabbit_spawn_time:
 db
 vblank_count:
 db
-joypad_down:
-db 	     			 ;dow/up/lef/rig/sta/sel/a/b
-joypad_pressed:
-db
+joypad_pressed_dpad:
+db 	     			 ;down/up/left/right
+joypad_pressed_action:
+db					 ;start/select/a/b
 player_frame_time:
 db
 player_update_time:
@@ -812,7 +848,7 @@ player_x:
 db
 player_tile:
 db
-player_flags:
+player_sprite_flags:
 db
 bullet_y:
 db
@@ -820,7 +856,7 @@ bullet_x:
 db
 bullet_tile:
 db
-bullet_flags:
+bullet_sprite_flags:
 db
 crop_y:
 db
